@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # 安装 Node.js （满足 >=18）及必要工具
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends nodejs npm \
+  && apt-get install -y --no-install-recommends nodejs npm procps \
   && rm -rf /var/lib/apt/lists/*
 
 # 从 uv 官方镜像复制 uv
@@ -43,6 +43,9 @@ RUN npm ci \
      --no-install-package nvidia-nvshmem-cu12 \
      --no-install-package nvidia-nvtx-cu12 \
   && uv pip install --python .venv/bin/python --no-deps graphiti-core==0.28.2 \
+  # camel-oasis==0.2.5 pins neo4j==5.23.0 but graphiti-core==0.28.2 requires >=5.26.0.
+  # Force-upgrade neo4j after the frozen sync; the driver API is backward-compatible.
+  && uv pip install --python .venv/bin/python "neo4j>=5.26.0" \
   && uv pip install --python .venv/bin/python \
      "torch==2.9.1+cpu" \
      --index-url https://download.pytorch.org/whl/cpu \
