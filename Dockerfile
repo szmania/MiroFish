@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # 安装 Node.js （满足 >=18）及必要工具
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends nodejs npm ca-certificates \
+  && apt-get install -y --no-install-recommends nodejs npm \
   && rm -rf /var/lib/apt/lists/*
 
 # 从 uv 官方镜像复制 uv
@@ -24,6 +24,7 @@ RUN npm ci \
   # 生产镜像仅安装运行时依赖，减少体积
   && cd backend && uv sync --frozen --no-dev \
   && uv pip install --python .venv/bin/python --no-deps graphiti-core==0.28.2 \
+  # 依赖安装后立即清理缓存；后续若新增包管理安装步骤，应放在清理前
   && npm cache clean --force \
   && rm -rf /root/.cache
 
