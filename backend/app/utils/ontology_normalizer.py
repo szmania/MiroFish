@@ -1,115 +1,119 @@
 """
-Ontology normalization utilities.
-
-Provides helpers to ensure ontology entity/edge names are valid Python
-identifiers so they can safely be used as dynamically-created class names
-(via ``type(name, ...)``) when setting a Zep Cloud or local Graphiti
-ontology.
+Utilities for normalizing ontology names before sending them to Zep.
 """
 
 from __future__ import annotations
 
 import copy
 import re
-from typing import Any
-
-_DEFAULT_NAME = "Unknown"
+from typing import Any, Dict, Tuple
 
 
-def _to_pascal_case(name: str) -> str:
-    """Convert any name to PascalCase, suitable for use as a Python class name.
+PASCAL_CASE_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
-    Examples::
 
-        >>> _to_pascal_case('works_for')
-        'WorksFor'
-        >>> _to_pascal_case('government agency')
-        'GovernmentAgency'
-        >>> _to_pascal_case('Person')
-        'Person'
+def _split_name_parts(raw_name: str) -> list[str]:
+    text = str(raw_name or "").strip()
+    if not text:
+        return []
+
+    text = re.sub(r"[^A-Za-z0-9]+", " ", text)
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
+    text = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", text)
+    text = re.sub(r"(?<=[A-Za-z])(?=[0-9])", " ", text)
+    text = re.sub(r"(?<=[0-9])(?=[A-Za-z])", " ", text)
+    return [part for part in text.split() if part]
+
+
+def normalize_pascal_case_name(raw_name: str, default_prefix: str = "Entity") -> str:
     """
-    # Split on non-alphanumeric characters
-    parts = re.split(r'[^a-zA-Z0-9]+', name)
-    words: list[str] = []
+    Convert an arbitrary label into Zep-safe PascalCase.
+    """
+    text = str(raw_name or "").strip()
+    if text and PASCAL_CASE_PATTERN.match(text):
+        return text
+
+    parts = _split_name_parts(text)
+    if not parts:
+        return default_prefix
+
+    normalized_parts = []
     for part in parts:
-        # Also split on camelCase boundaries (e.g. 'camelCase' → ['camel', 'Case'])
-        words.extend(re.sub(r'([a-z])([A-Z])', r'\1_\2', part).split('_'))
-    result = ''.join(word.capitalize() for word in words if word)
-    if not result:
-        return _DEFAULT_NAME
-    # Python identifiers must start with a letter or underscore.
-    if not result[0].isalpha() and result[0] != '_':
-        result = 'T' + result
-    return result
-
-
-def normalize_ontology_for_zep(
-    ontology: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, str]]:
-    """Return a normalised copy of *ontology* suitable for Zep / Graphiti.
-
-    Entity type names are converted to PascalCase so they can be used
-    directly as Python class names in ``type(name, ...)``.  Edge type names
-    are only normalised if they contain characters that would make them
-    invalid Python identifiers; valid UPPER_SNAKE_CASE names such as
-    ``WORKS_FOR`` are left unchanged.
-
-    ``source`` / ``target`` references inside edge ``source_targets`` lists
-    are updated to reflect any renamed entity types.
-
-    Parameters
-    ----------
-    ontology:
-        Ontology dict with ``entity_types`` and ``edge_types`` lists as
-        produced by :class:`~app.services.ontology_generator.OntologyGenerator`.
-
-    Returns
-    -------
-    normalized_ontology:
-        A deep copy of *ontology* with normalised names.
-    name_mapping:
-        Flat mapping of ``{original_name: normalized_name}`` for every
-        entity and edge type that was processed (including unchanged ones).
-        Callers can inspect entries where ``original != normalized`` to
-        discover which names were actually altered.
-    """
-    ontology = copy.deepcopy(ontology)
-
-    # Maps original entity names → normalized entity names; used to fix
-    # source/target references in edge definitions.
-    entity_rename: dict[str, str] = {}
-    # Combined mapping returned to callers (entity + edge names).
-    name_mapping: dict[str, str] = {}
-
-    # ------------------------------------------------------------------
-    # 1. Normalize entity type names → PascalCase
-    # ------------------------------------------------------------------
-    for entity_def in ontology.get("entity_types", []):
-        original = entity_def.get("name", "")
-        normalized = _to_pascal_case(original) if original else _DEFAULT_NAME
-        entity_def["name"] = normalized
-        entity_rename[original] = normalized
-        name_mapping[original] = normalized
-
-    # ------------------------------------------------------------------
-    # 2. Normalize edge type names and update source/target references
-    # ------------------------------------------------------------------
-    for edge_def in ontology.get("edge_types", []):
-        original = edge_def.get("name", "")
-        # Keep names that are already valid Python identifiers unchanged;
-        # normalise anything that would cause ``type(name, ...)`` to fail.
-        if original and not original.isidentifier():
-            normalized = _to_pascal_case(original)
+        if part.isdigit():
+            normalized_parts.append(part)
+        elif part.isupper() and len(part) > 1:
+            normalized_parts.append(part)
         else:
-            normalized = original
-        edge_def["name"] = normalized
-        name_mapping[original] = normalized
+            normalized_parts.append(part[0].upper() + part[1:].lower())
 
-        # Update source/target references to use the new entity names.
-        for st in edge_def.get("source_targets", []):
-            if st.get("source") in entity_rename:
-                st["source"] = entity_rename[st["source"]]
-            if st.get("target") in entity_rename:
-                st["target"] = entity_rename[st["target"]]
+    normalized = "".join(normalized_parts)
 
-    return ontology, name_mapping
+    if not normalized:
+        normalized = default_prefix
+    elif not normalized[0].isalpha():
+        normalized = f"{default_prefix}{normalized}"
+
+    return normalized
+
+
+def _ensure_unique_name(base_name: str, used_names: set[str]) -> str:
+    candidate = base_name
+    suffix = 2
+
+    while candidate in used_names:
+        candidate = f"{base_name}{suffix}"
+        suffix += 1
+
+    used_names.add(candidate)
+    return candidate
+
+
+def normalize_ontology_for_zep(ontology: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """
+    Normalize ontology entity names and source/target references for Zep validation.
+
+    Returns:
+        A tuple of (normalized_ontology, entity_name_mapping)
+    """
+    normalized = copy.deepcopy(ontology or {})
+    entity_types = normalized.setdefault("entity_types", [])
+    edge_types = normalized.setdefault("edge_types", [])
+
+    used_entity_names: set[str] = set()
+    entity_name_mapping: Dict[str, str] = {}
+
+    for entity in entity_types:
+        raw_name = str(entity.get("name", "")).strip()
+        safe_name = normalize_pascal_case_name(raw_name, default_prefix="Entity")
+        safe_name = _ensure_unique_name(safe_name, used_entity_names)
+
+        entity["name"] = safe_name
+
+        if raw_name:
+            entity_name_mapping[raw_name] = safe_name
+            entity_name_mapping[raw_name.strip()] = safe_name
+        entity_name_mapping[safe_name] = safe_name
+
+    for edge in edge_types:
+        source_targets = edge.setdefault("source_targets", [])
+        for source_target in source_targets:
+            raw_source = str(source_target.get("source", "")).strip()
+            raw_target = str(source_target.get("target", "")).strip()
+
+            if raw_source:
+                source_target["source"] = entity_name_mapping.get(
+                    raw_source,
+                    normalize_pascal_case_name(raw_source, default_prefix="Entity"),
+                )
+            else:
+                source_target["source"] = "Entity"
+
+            if raw_target:
+                source_target["target"] = entity_name_mapping.get(
+                    raw_target,
+                    normalize_pascal_case_name(raw_target, default_prefix="Entity"),
+                )
+            else:
+                source_target["target"] = "Entity"
+
+    return normalized, entity_name_mapping
