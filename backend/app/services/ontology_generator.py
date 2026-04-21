@@ -26,150 +26,103 @@ def _to_pascal_case(name: str) -> str:
     return result if result else 'Unknown'
 
 
-# 本体生成的系统提示词
-ONTOLOGY_SYSTEM_PROMPT = """你是一个专业的知识图谱本体设计专家。你的任务是分析给定的文本内容和模拟需求，设计适合**社交媒体舆论模拟**的实体类型和关系类型。
+# Ontology generation system prompt
+ONTOLOGY_SYSTEM_PROMPT = """You are an expert knowledge-graph ontology designer. Your task is to analyze the provided source text and simulation requirement, then design entity and relationship types suitable for social-media opinion simulation.
 
-**重要：你必须输出有效的JSON格式数据，不要输出任何其他内容。**
+IMPORTANT: Output valid JSON only. Do not output anything outside JSON.
 
-## 核心任务背景
+## Context
 
-我们正在构建一个**社交媒体舆论模拟系统**。在这个系统中：
-- 每个实体都是一个可以在社交媒体上发声、互动、传播信息的"账号"或"主体"
-- 实体之间会相互影响、转发、评论、回应
-- 我们需要模拟舆论事件中各方的反应和信息传播路径
+We are building a social-media simulation where:
+- Each entity is a real-world actor that can post, react, and interact on social platforms.
+- Entities influence each other through posting, commenting, reposting, and responding.
+- We need to simulate reactions and information propagation in public opinion events.
 
-因此，**实体必须是现实中真实存在的、可以在社媒上发声和互动的主体**：
+Therefore, entities must be real, concrete actors that can participate in social-media discourse.
 
-**可以是**：
-- 具体的个人（公众人物、当事人、意见领袖、专家学者、普通人）
-- 公司、企业（包括其官方账号）
-- 组织机构（大学、协会、NGO、工会等）
-- 政府部门、监管机构
-- 媒体机构（报纸、电视台、自媒体、网站）
-- 社交媒体平台本身
-- 特定群体代表（如校友会、粉丝团、维权群体等）
+Allowed examples:
+- Individuals (public figures, stakeholders, experts, citizens)
+- Companies and organizations (including official accounts)
+- Government or regulatory bodies
+- Media organizations and platforms
+- Representative groups (fan groups, alumni groups, advocacy groups)
 
-**不可以是**：
-- 抽象概念（如"舆论"、"情绪"、"趋势"）
-- 主题/话题（如"学术诚信"、"教育改革"）
-- 观点/态度（如"支持方"、"反对方"）
+Not allowed:
+- Abstract concepts (e.g., "public opinion", "emotion", "trend")
+- Topics (e.g., "education reform")
+- Standalone stances (e.g., "supporters", "opponents")
 
-## 输出格式
-
-请输出JSON格式，包含以下结构：
+## Output Schema
 
 ```json
 {
     "entity_types": [
         {
-            "name": "实体类型名称（英文，PascalCase）",
-            "description": "简短描述（英文，不超过100字符）",
+            "name": "English PascalCase",
+            "description": "Short English description, <= 100 chars",
             "attributes": [
                 {
-                    "name": "属性名（英文，snake_case）",
+                    "name": "english_snake_case",
                     "type": "text",
-                    "description": "属性描述"
+                    "description": "attribute description"
                 }
             ],
-            "examples": ["示例实体1", "示例实体2"]
+            "examples": ["example 1", "example 2"]
         }
     ],
     "edge_types": [
         {
-            "name": "关系类型名称（英文，UPPER_SNAKE_CASE）",
-            "description": "简短描述（英文，不超过100字符）",
+            "name": "ENGLISH_UPPER_SNAKE_CASE",
+            "description": "Short English description, <= 100 chars",
             "source_targets": [
-                {"source": "源实体类型", "target": "目标实体类型"}
+                {"source": "SourceEntityType", "target": "TargetEntityType"}
             ],
             "attributes": []
         }
     ],
-    "analysis_summary": "对文本内容的简要分析说明"
+    "analysis_summary": "Brief analysis summary"
 }
 ```
 
-## 设计指南（极其重要！）
+## Design Requirements
 
-### 1. 实体类型设计 - 必须严格遵守
+1) Entity type design
+- Exactly 10 entity types.
+- Include two fallback types as the last two entries:
+    - `Person`: fallback for natural persons.
+    - `Organization`: fallback for organizations.
+- Design the other 8 as specific types based on the source text.
+- Keep boundaries clear and avoid overlap.
 
-**数量要求：必须正好10个实体类型**
+2) Relationship type design
+- 6 to 10 edge types.
+- Reflect realistic social-media interactions.
+- Ensure source_targets cover your defined entity types.
 
-**层次结构要求（必须同时包含具体类型和兜底类型）**：
+3) Attribute design
+- 1 to 3 key attributes per entity type.
+- Do NOT use reserved names: `name`, `uuid`, `group_id`, `created_at`, `summary`.
+- Prefer: `full_name`, `title`, `role`, `position`, `location`, `description`.
 
-你的10个实体类型必须包含以下层次：
+## Reference Type Ideas
 
-A. **兜底类型（必须包含，放在列表最后2个）**：
-   - `Person`: 任何自然人个体的兜底类型。当一个人不属于其他更具体的人物类型时，归入此类。
-   - `Organization`: 任何组织机构的兜底类型。当一个组织不属于其他更具体的组织类型时，归入此类。
+People: Student, Professor, Journalist, Celebrity, Executive, Official, Lawyer, Doctor, Person.
+Organizations: University, Company, GovernmentAgency, MediaOutlet, Hospital, School, NGO, Organization.
 
-B. **具体类型（8个，根据文本内容设计）**：
-   - 针对文本中出现的主要角色，设计更具体的类型
-   - 例如：如果文本涉及学术事件，可以有 `Student`, `Professor`, `University`
-   - 例如：如果文本涉及商业事件，可以有 `Company`, `CEO`, `Employee`
+## Reference Edge Ideas
 
-**为什么需要兜底类型**：
-- 文本中会出现各种人物，如"中小学教师"、"路人甲"、"某位网友"
-- 如果没有专门的类型匹配，他们应该被归入 `Person`
-- 同理，小型组织、临时团体等应该归入 `Organization`
-
-**具体类型的设计原则**：
-- 从文本中识别出高频出现或关键的角色类型
-- 每个具体类型应该有明确的边界，避免重叠
-- description 必须清晰说明这个类型和兜底类型的区别
-
-### 2. 关系类型设计
-
-- 数量：6-10个
-- 关系应该反映社媒互动中的真实联系
-- 确保关系的 source_targets 涵盖你定义的实体类型
-
-### 3. 属性设计
-
-- 每个实体类型1-3个关键属性
-- **注意**：属性名不能使用 `name`、`uuid`、`group_id`、`created_at`、`summary`（这些是系统保留字）
-- 推荐使用：`full_name`, `title`, `role`, `position`, `location`, `description` 等
-
-## 实体类型参考
-
-**个人类（具体）**：
-- Student: 学生
-- Professor: 教授/学者
-- Journalist: 记者
-- Celebrity: 明星/网红
-- Executive: 高管
-- Official: 政府官员
-- Lawyer: 律师
-- Doctor: 医生
-
-**个人类（兜底）**：
-- Person: 任何自然人（不属于上述具体类型时使用）
-
-**组织类（具体）**：
-- University: 高校
-- Company: 公司企业
-- GovernmentAgency: 政府机构
-- MediaOutlet: 媒体机构
-- Hospital: 医院
-- School: 中小学
-- NGO: 非政府组织
-
-**组织类（兜底）**：
-- Organization: 任何组织机构（不属于上述具体类型时使用）
-
-## 关系类型参考
-
-- WORKS_FOR: 工作于
-- STUDIES_AT: 就读于
-- AFFILIATED_WITH: 隶属于
-- REPRESENTS: 代表
-- REGULATES: 监管
-- REPORTS_ON: 报道
-- COMMENTS_ON: 评论
-- RESPONDS_TO: 回应
-- SUPPORTS: 支持
-- OPPOSES: 反对
-- COLLABORATES_WITH: 合作
-- COMPETES_WITH: 竞争
+- WORKS_FOR: works for / employed by
+- STUDIES_AT: studies at
+- AFFILIATED_WITH: affiliated with / belongs to
+- REPRESENTS: represents
+- REGULATES: regulates / oversees
+- REPORTS_ON: reports on / covers
+- COMMENTS_ON: comments on / replies to
+- RESPONDS_TO: responds to / reacts to
+- SUPPORTS: supports / endorses
+- OPPOSES: opposes / criticizes
+- COLLABORATES_WITH: collaborates with
+- COMPETES_WITH: competes with
 """
 
 
@@ -243,33 +196,36 @@ class OntologyGenerator:
         # 如果文本超过5万字，截断（仅影响传给LLM的内容，不影响图谱构建）
         if len(combined_text) > self.MAX_TEXT_LENGTH_FOR_LLM:
             combined_text = combined_text[:self.MAX_TEXT_LENGTH_FOR_LLM]
-            combined_text += f"\n\n...(原文共{original_length}字，已截取前{self.MAX_TEXT_LENGTH_FOR_LLM}字用于本体分析)..."
+            combined_text += (
+                f"\n\n...(Original document length: {original_length} chars; "
+                f"truncated to first {self.MAX_TEXT_LENGTH_FOR_LLM} chars for ontology analysis)..."
+            )
         
-        message = f"""## 模拟需求
+        message = f"""## Simulation Requirement
 
 {simulation_requirement}
 
-## 文档内容
+## Document Content
 
 {combined_text}
 """
         
         if additional_context:
             message += f"""
-## 额外说明
+## Additional Context
 
 {additional_context}
 """
         
         message += """
-请根据以上内容，设计适合社会舆论模拟的实体类型和关系类型。
+Based on the above content, design entity and relationship types suitable for social-media opinion simulation.
 
-**必须遵守的规则**：
-1. 必须正好输出10个实体类型
-2. 最后2个必须是兜底类型：Person（个人兜底）和 Organization（组织兜底）
-3. 前8个是根据文本内容设计的具体类型
-4. 所有实体类型必须是现实中可以发声的主体，不能是抽象概念
-5. 属性名不能使用 name、uuid、group_id 等保留字，用 full_name、org_name 等替代
+**Required rules**:
+1. Output exactly 10 entity types.
+2. The last 2 must be fallback types: Person and Organization.
+3. The first 8 must be specific types designed from the provided text.
+4. All entity types must be real actors that can speak/act publicly, not abstract concepts.
+5. Attribute names must not use reserved names like name, uuid, group_id. Use alternatives such as full_name and org_name.
 """
         
         return message
@@ -503,4 +459,3 @@ class OntologyGenerator:
         code_lines.append('}')
         
         return '\n'.join(code_lines)
-

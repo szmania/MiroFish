@@ -7,6 +7,10 @@
     "label": "English",
     "llmInstruction": "Please respond in English."
   },
+  "vi": {
+    "label": "Tiếng Việt",
+    "llmInstruction": "Vui lòng trả lời bằng tiếng Việt."
+  },
   "es": {
     "label": "Español",
     "llmInstruction": "Por favor, responde en español."

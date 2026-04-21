@@ -17,7 +17,7 @@ from ..config import Config
 from .graph_provider import create_graph_provider
 from ..utils.logger import get_logger
 from ..utils.llm_client import LLMClient
-from ..utils.locale import get_locale, t
+from ..utils.locale import get_locale, get_language_instruction, t
 
 logger = get_logger('mirofish.zep_tools')
 
@@ -1083,23 +1083,25 @@ class ZepToolsService:
         
         将复杂问题分解为多个可以独立检索的子问题
         """
-        system_prompt = """你是一个专业的问题分析专家。你的任务是将一个复杂问题分解为多个可以在模拟世界中独立观察的子问题。
+        system_prompt = f"""You are an expert question analyst. Decompose one complex question into multiple independent sub-queries that can be observed in the simulation world.
 
-要求：
-1. 每个子问题应该足够具体，可以在模拟世界中找到相关的Agent行为或事件
-2. 子问题应该覆盖原问题的不同维度（如：谁、什么、为什么、怎么样、何时、何地）
-3. 子问题应该与模拟场景相关
-4. 返回JSON格式：{"sub_queries": ["子问题1", "子问题2", ...]}"""
+    Requirements:
+    1. Each sub-query must be specific enough to retrieve related agent behavior or events.
+    2. Cover different dimensions of the original question (who, what, why, how, when, where).
+    3. Keep all sub-queries relevant to the simulation context.
+    4. Return JSON only: {{"sub_queries": ["sub-query 1", "sub-query 2", ...]}}
 
-        user_prompt = f"""模拟需求背景：
-{simulation_requirement}
+    {get_language_instruction()}"""
 
-{f"报告上下文：{report_context[:500]}" if report_context else ""}
+        user_prompt = f"""Simulation requirement context:
+    {simulation_requirement}
 
-请将以下问题分解为{max_queries}个子问题：
-{query}
+    {f"Report context: {report_context[:500]}" if report_context else ""}
 
-返回JSON格式的子问题列表。"""
+    Decompose the following question into {max_queries} sub-queries:
+    {query}
+
+    Return a JSON list of sub-queries only."""
 
         try:
             response = self.llm.chat_json(
@@ -1119,9 +1121,9 @@ class ZepToolsService:
             # 降级：返回基于原问题的变体
             return [
                 query,
-                f"{query} 的主要参与者",
-                f"{query} 的原因和影响",
-                f"{query} 的发展过程"
+                f"Main participants involved in: {query}",
+                f"Causes and impacts of: {query}",
+                f"How {query} evolved over time"
             ][:max_queries]
     
     def panorama_search(
@@ -1332,15 +1334,15 @@ class ZepToolsService:
         
         # 添加优化前缀，约束Agent回复格式
         INTERVIEW_PROMPT_PREFIX = (
-            "你正在接受一次采访。请结合你的人设、所有的过往记忆与行动，"
-            "以纯文本方式直接回答以下问题。\n"
-            "回复要求：\n"
-            "1. 直接用自然语言回答，不要调用任何工具\n"
-            "2. 不要返回JSON格式或工具调用格式\n"
-            "3. 不要使用Markdown标题（如#、##、###）\n"
-            "4. 按问题编号逐一回答，每个回答以「问题X：」开头（X为问题编号）\n"
-            "5. 每个问题的回答之间用空行分隔\n"
-            "6. 回答要有实质内容，每个问题至少回答2-3句话\n\n"
+            "You are being interviewed. Based on your persona, memories, and past actions, "
+            "answer the following questions directly in plain text.\n"
+            "Reply requirements:\n"
+            "1. Use natural language only; do not call any tools\n"
+            "2. Do not return JSON or tool-call formats\n"
+            "3. Do not use Markdown titles (e.g., #, ##, ###)\n"
+            "4. Answer question-by-question, each starting with 'Question X:'\n"
+            "5. Separate answers with blank lines\n"
+            "6. Provide substantial answers, at least 2-3 sentences per question\n\n"
         )
         optimized_prompt = f"{INTERVIEW_PROMPT_PREFIX}{combined_prompt}"
         
@@ -1559,30 +1561,32 @@ class ZepToolsService:
             }
             agent_summaries.append(summary)
         
-        system_prompt = """你是一个专业的采访策划专家。你的任务是根据采访需求，从模拟Agent列表中选择最适合采访的对象。
+        system_prompt = f"""You are an expert interview planner. Select the most suitable agents from the simulation list for the interview objective.
 
-选择标准：
-1. Agent的身份/职业与采访主题相关
-2. Agent可能持有独特或有价值的观点
-3. 选择多样化的视角（如：支持方、反对方、中立方、专业人士等）
-4. 优先选择与事件直接相关的角色
+    Selection criteria:
+    1. Agent identity/profession is relevant to the interview topic.
+    2. Agent is likely to provide unique or high-value viewpoints.
+    3. Keep perspective diversity (supportive, opposing, neutral, professional, etc.).
+    4. Prioritize roles directly related to the event.
 
-返回JSON格式：
-{
-    "selected_indices": [选中Agent的索引列表],
-    "reasoning": "选择理由说明"
-}"""
+    Return JSON only:
+    {{
+      "selected_indices": [indices of selected agents],
+      "reasoning": "selection rationale"
+    }}
 
-        user_prompt = f"""采访需求：
-{interview_requirement}
+    {get_language_instruction()}"""
 
-模拟背景：
-{simulation_requirement if simulation_requirement else "未提供"}
+        user_prompt = f"""Interview objective:
+    {interview_requirement}
 
-可选择的Agent列表（共{len(agent_summaries)}个）：
-{json.dumps(agent_summaries, ensure_ascii=False, indent=2)}
+    Simulation context:
+    {simulation_requirement if simulation_requirement else "Not provided"}
 
-请选择最多{max_agents}个最适合采访的Agent，并说明选择理由。"""
+    Available agents ({len(agent_summaries)} total):
+    {json.dumps(agent_summaries, ensure_ascii=False, indent=2)}
+
+    Select up to {max_agents} most suitable agents and explain why."""
 
         try:
             response = self.llm.chat_json(
@@ -1594,7 +1598,7 @@ class ZepToolsService:
             )
             
             selected_indices = response.get("selected_indices", [])[:max_agents]
-            reasoning = response.get("reasoning", "基于相关性自动选择")
+            reasoning = response.get("reasoning", "Automatically selected based on relevance")
             
             # 获取选中的Agent完整信息
             selected_agents = []
@@ -1611,7 +1615,7 @@ class ZepToolsService:
             # 降级：选择前N个
             selected = profiles[:max_agents]
             indices = list(range(min(max_agents, len(profiles))))
-            return selected, indices, "使用默认选择策略"
+            return selected, indices, "Fallback: selected first available agents"
     
     def _generate_interview_questions(
         self,
@@ -1623,25 +1627,27 @@ class ZepToolsService:
         
         agent_roles = [a.get("profession", "未知") for a in selected_agents]
         
-        system_prompt = """你是一个专业的记者/采访者。根据采访需求，生成3-5个深度采访问题。
+        system_prompt = f"""You are a professional interviewer. Generate 3-5 in-depth interview questions for the given objective.
 
-问题要求：
-1. 开放性问题，鼓励详细回答
-2. 针对不同角色可能有不同答案
-3. 涵盖事实、观点、感受等多个维度
-4. 语言自然，像真实采访一样
-5. 每个问题控制在50字以内，简洁明了
-6. 直接提问，不要包含背景说明或前缀
+    Requirements:
+    1. Open-ended questions that encourage detailed responses.
+    2. Questions suitable for different roles and perspectives.
+    3. Cover facts, viewpoints, and feelings.
+    4. Natural and realistic interview wording.
+    5. Keep each question concise.
+    6. Ask directly without prefixed background narration.
 
-返回JSON格式：{"questions": ["问题1", "问题2", ...]}"""
+    Return JSON only: {{"questions": ["question 1", "question 2", ...]}}
 
-        user_prompt = f"""采访需求：{interview_requirement}
+    {get_language_instruction()}"""
 
-模拟背景：{simulation_requirement if simulation_requirement else "未提供"}
+        user_prompt = f"""Interview objective: {interview_requirement}
 
-采访对象角色：{', '.join(agent_roles)}
+    Simulation context: {simulation_requirement if simulation_requirement else "Not provided"}
 
-请生成3-5个采访问题。"""
+    Interviewee roles: {', '.join(agent_roles)}
+
+    Generate 3-5 interview questions."""
 
         try:
             response = self.llm.chat_json(
@@ -1652,14 +1658,14 @@ class ZepToolsService:
                 temperature=0.5
             )
             
-            return response.get("questions", [f"关于{interview_requirement}，您有什么看法？"])
+            return response.get("questions", [f"What is your view on {interview_requirement}?"])
             
         except Exception as e:
             logger.warning(t("console.generateInterviewQuestionsFailed", error=e))
             return [
-                f"关于{interview_requirement}，您的观点是什么？",
-                "这件事对您或您所代表的群体有什么影响？",
-                "您认为应该如何解决或改进这个问题？"
+                f"What is your perspective on {interview_requirement}?",
+                "How does this issue affect you or the group you represent?",
+                "What actions or improvements would you recommend?"
             ]
     
     def _generate_interview_summary(
@@ -1677,29 +1683,35 @@ class ZepToolsService:
         for interview in interviews:
             interview_texts.append(f"【{interview.agent_name}（{interview.agent_role}）】\n{interview.response[:500]}")
         
-        quote_instruction = "引用受访者原话时使用中文引号「」" if get_locale() == 'zh' else 'Use quotation marks "" when quoting interviewees'
-        system_prompt = f"""你是一个专业的新闻编辑。请根据多位受访者的回答，生成一份采访摘要。
+        quote_instruction = (
+            "Quote interviewees with Chinese quotes 「」"
+            if get_locale() == 'zh'
+            else 'Use quotation marks "" when quoting interviewees'
+        )
+        system_prompt = f"""You are a professional news editor. Generate an interview summary from multiple interviewee responses.
 
-摘要要求：
-1. 提炼各方主要观点
-2. 指出观点的共识和分歧
-3. 突出有价值的引言
-4. 客观中立，不偏袒任何一方
-5. 控制在1000字内
+    Summary requirements:
+    1. Distill each side's core viewpoints.
+    2. Highlight consensus and disagreement.
+    3. Surface valuable quotes.
+    4. Remain objective and neutral.
+    5. Keep it concise and readable.
 
-格式约束（必须遵守）：
-- 使用纯文本段落，用空行分隔不同部分
-- 不要使用Markdown标题（如#、##、###）
-- 不要使用分割线（如---、***）
-- {quote_instruction}
-- 可以使用**加粗**标记关键词，但不要使用其他Markdown语法"""
+    Formatting constraints:
+    - Use plain text paragraphs separated by blank lines.
+    - Do not use Markdown headings (#, ##, ###).
+    - Do not use separator lines (---, ***).
+    - {quote_instruction}
+    - You may use **bold** for key terms only.
 
-        user_prompt = f"""采访主题：{interview_requirement}
+    {get_language_instruction()}"""
 
-采访内容：
-{"".join(interview_texts)}
+        user_prompt = f"""Interview topic: {interview_requirement}
 
-请生成采访摘要。"""
+    Interview content:
+    {"".join(interview_texts)}
+
+    Generate the interview summary."""
 
         try:
             summary = self.llm.chat(
