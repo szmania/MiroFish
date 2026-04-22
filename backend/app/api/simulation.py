@@ -22,7 +22,7 @@ logger = get_logger('mirofish.api.simulation')
 
 # Interview prompt 优化前缀
 # 添加此前缀可以避免Agent调用工具，直接用文本回复
-INTERVIEW_PROMPT_PREFIX = "结合你的人设、所有的过往记忆与行动，不调用任何工具直接用文本回复我："
+INTERVIEW_PROMPT_PREFIX = "Based on your persona, all past memories, and actions, reply directly in plain text without calling any tools: "
 
 
 def optimize_interview_prompt(prompt: str) -> str:
@@ -57,10 +57,10 @@ def get_graph_entities(graph_id: str):
         enrich: 是否获取相关边信息（默认true）
     """
     try:
-        if not Config.ZEP_API_KEY:
+        if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": t('api.zepApiKeyMissing')
+                "error": "Graph backend is not configured correctly"
             }), 500
         
         entity_types_str = request.args.get('entity_types', '')
@@ -94,10 +94,10 @@ def get_graph_entities(graph_id: str):
 def get_entity_detail(graph_id: str, entity_uuid: str):
     """获取单个实体的详细信息"""
     try:
-        if not Config.ZEP_API_KEY:
+        if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": t('api.zepApiKeyMissing')
+                "error": "Graph backend is not configured correctly"
             }), 500
         
         reader = ZepEntityReader()
@@ -127,10 +127,10 @@ def get_entity_detail(graph_id: str, entity_uuid: str):
 def get_entities_by_type(graph_id: str, entity_type: str):
     """获取指定类型的所有实体"""
     try:
-        if not Config.ZEP_API_KEY:
+        if Config.validate_graph_backend():
             return jsonify({
                 "success": False,
-                "error": t('api.zepApiKeyMissing')
+                "error": "Graph backend is not configured correctly"
             }), 500
         
         enrich = request.args.get('enrich', 'true').lower() == 'true'

@@ -16,13 +16,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from openai import OpenAI
-from zep_cloud.client import Zep
 
 from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.locale import get_language_instruction, get_locale, set_locale, t
+from .graph_provider import create_graph_provider
 from .zep_entity_reader import EntityNode, ZepEntityReader
-
 logger = get_logger('mirofish.oasis_profile')
 
 
@@ -198,16 +197,9 @@ class OasisProfileGenerator:
             base_url=self.base_url
         )
         
-        # Zep客户端用于检索丰富上下文
         self.zep_api_key = zep_api_key or Config.ZEP_API_KEY
-        self.zep_client = None
+        self.graph_provider = create_graph_provider()
         self.graph_id = graph_id
-        
-        if self.zep_api_key:
-            try:
-                self.zep_client = Zep(api_key=self.zep_api_key)
-            except Exception as e:
-                logger.warning(f"Zep客户端初始化失败: {e}")
     
     def generate_profile_from_entity(
         self, 
@@ -298,9 +290,6 @@ class OasisProfileGenerator:
         """
         import concurrent.futures
         
-        if not self.zep_client:
-            return {"facts": [], "node_summaries": [], "context": ""}
-        
         entity_name = entity.name
         
         results = {
@@ -324,7 +313,7 @@ class OasisProfileGenerator:
             
             for attempt in range(max_retries):
                 try:
-                    return self.zep_client.graph.search(
+                    return self.graph_provider.search(
                         query=comprehensive_query,
                         graph_id=self.graph_id,
                         limit=30,
@@ -349,7 +338,7 @@ class OasisProfileGenerator:
             
             for attempt in range(max_retries):
                 try:
-                    return self.zep_client.graph.search(
+                    return self.graph_provider.search(
                         query=comprehensive_query,
                         graph_id=self.graph_id,
                         limit=20,
@@ -378,19 +367,19 @@ class OasisProfileGenerator:
             
             # 处理边搜索结果
             all_facts = set()
-            if edge_result and hasattr(edge_result, 'edges') and edge_result.edges:
+            if edge_result and edge_result.edges:
                 for edge in edge_result.edges:
-                    if hasattr(edge, 'fact') and edge.fact:
+                    if edge.fact:
                         all_facts.add(edge.fact)
             results["facts"] = list(all_facts)
             
             # 处理节点搜索结果
             all_summaries = set()
-            if node_result and hasattr(node_result, 'nodes') and node_result.nodes:
+            if node_result and node_result.nodes:
                 for node in node_result.nodes:
-                    if hasattr(node, 'summary') and node.summary:
+                    if node.summary:
                         all_summaries.add(node.summary)
-                    if hasattr(node, 'name') and node.name and node.name != entity_name:
+                    if node.name and node.name != entity_name:
                         all_summaries.add(f"相关实体: {node.name}")
             results["node_summaries"] = list(all_summaries)
             
@@ -671,7 +660,7 @@ class OasisProfileGenerator:
     
     def _get_system_prompt(self, is_individual: bool) -> str:
         """获取系统提示词"""
-        base_prompt = "你是社交媒体用户画像生成专家。生成详细、真实的人设用于舆论模拟,最大程度还原已有现实情况。必须返回有效的JSON格式，所有字符串值不能包含未转义的换行符。"
+        base_prompt = "You are an expert in social-media persona design. Generate detailed and realistic personas for opinion simulation while preserving known real-world context. You must return valid JSON, and string values must not contain unescaped newlines."
         return f"{base_prompt}\n\n{get_language_instruction()}"
     
     def _build_individual_persona_prompt(
@@ -684,43 +673,43 @@ class OasisProfileGenerator:
     ) -> str:
         """构建个人实体的详细人设提示词"""
         
-        attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "无"
-        context_str = context[:3000] if context else "无额外上下文"
+        attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "none"
+        context_str = context[:3000] if context else "no additional context"
         
-        return f"""为实体生成详细的社交媒体用户人设,最大程度还原已有现实情况。
+        return f"""Generate a detailed social-media persona for this entity, preserving real-world context as much as possible.
 
-实体名称: {entity_name}
-实体类型: {entity_type}
-实体摘要: {entity_summary}
-实体属性: {attrs_str}
+    Entity name: {entity_name}
+    Entity type: {entity_type}
+    Entity summary: {entity_summary}
+    Entity attributes: {attrs_str}
 
-上下文信息:
+    Context:
 {context_str}
 
-请生成JSON，包含以下字段:
+    Return JSON with these fields:
 
-1. bio: 社交媒体简介，200字
-2. persona: 详细人设描述（2000字的纯文本），需包含:
-   - 基本信息（年龄、职业、教育背景、所在地）
-   - 人物背景（重要经历、与事件的关联、社会关系）
-   - 性格特征（MBTI类型、核心性格、情绪表达方式）
-   - 社交媒体行为（发帖频率、内容偏好、互动风格、语言特点）
-   - 立场观点（对话题的态度、可能被激怒/感动的内容）
-   - 独特特征（口头禅、特殊经历、个人爱好）
-   - 个人记忆（人设的重要部分，要介绍这个个体与事件的关联，以及这个个体在事件中的已有动作与反应）
-3. age: 年龄数字（必须是整数）
-4. gender: 性别，必须是英文: "male" 或 "female"
-5. mbti: MBTI类型（如INTJ、ENFP等）
-6. country: 国家（使用中文，如"中国"）
-7. profession: 职业
-8. interested_topics: 感兴趣话题数组
+    1. bio: social profile summary (about 200 words)
+    2. persona: detailed persona description (plain text, about 2000 words), including:
+       - basic info (age, profession, education, location)
+       - background (key experiences, relation to the event, social ties)
+       - personality traits (MBTI, core traits, emotional style)
+       - social-media behavior (posting frequency, content preferences, interaction style, language style)
+       - stance and views (attitudes toward topics, likely triggers)
+       - distinctive traits (catchphrases, special experiences, hobbies)
+       - memory relevant to this event (past actions/reactions)
+    3. age: integer age
+    4. gender: must be English value "male" or "female"
+    5. mbti: MBTI type (e.g., INTJ, ENFP)
+    6. country: country name
+    7. profession: profession
+    8. interested_topics: array of topics
 
-重要:
-- 所有字段值必须是字符串或数字，不要使用换行符
-- persona必须是一段连贯的文字描述
-- {get_language_instruction()} (gender字段必须用英文male/female)
-- 内容要与实体信息保持一致
-- age必须是有效的整数，gender必须是"male"或"female"
+    Important:
+    - All field values must be strings or numbers; do not use newlines in values
+    - persona must be one coherent paragraph
+    - {get_language_instruction()} (gender must remain English values: male/female)
+    - Keep content consistent with entity information
+    - age must be a valid integer; gender must be "male" or "female"
 """
 
     def _build_group_persona_prompt(
@@ -733,43 +722,43 @@ class OasisProfileGenerator:
     ) -> str:
         """构建群体/机构实体的详细人设提示词"""
         
-        attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "无"
-        context_str = context[:3000] if context else "无额外上下文"
+        attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "none"
+        context_str = context[:3000] if context else "no additional context"
         
-        return f"""为机构/群体实体生成详细的社交媒体账号设定,最大程度还原已有现实情况。
+        return f"""Generate a detailed social-media account profile for this organization/group entity, preserving real-world context as much as possible.
 
-实体名称: {entity_name}
-实体类型: {entity_type}
-实体摘要: {entity_summary}
-实体属性: {attrs_str}
+    Entity name: {entity_name}
+    Entity type: {entity_type}
+    Entity summary: {entity_summary}
+    Entity attributes: {attrs_str}
 
-上下文信息:
+    Context:
 {context_str}
 
-请生成JSON，包含以下字段:
+    Return JSON with these fields:
 
-1. bio: 官方账号简介，200字，专业得体
-2. persona: 详细账号设定描述（2000字的纯文本），需包含:
-   - 机构基本信息（正式名称、机构性质、成立背景、主要职能）
-   - 账号定位（账号类型、目标受众、核心功能）
-   - 发言风格（语言特点、常用表达、禁忌话题）
-   - 发布内容特点（内容类型、发布频率、活跃时间段）
-   - 立场态度（对核心话题的官方立场、面对争议的处理方式）
-   - 特殊说明（代表的群体画像、运营习惯）
-   - 机构记忆（机构人设的重要部分，要介绍这个机构与事件的关联，以及这个机构在事件中的已有动作与反应）
-3. age: 固定填30（机构账号的虚拟年龄）
-4. gender: 固定填"other"（机构账号使用other表示非个人）
-5. mbti: MBTI类型，用于描述账号风格，如ISTJ代表严谨保守
-6. country: 国家（使用中文，如"中国"）
-7. profession: 机构职能描述
-8. interested_topics: 关注领域数组
+    1. bio: official account bio (about 200 words, professional tone)
+    2. persona: detailed account profile (plain text, about 2000 words), including:
+       - org basics (formal name, org nature, founding background, core functions)
+       - account positioning (account type, target audience, core purpose)
+       - communication style (language style, common expressions, sensitive topics)
+       - publishing behavior (content categories, cadence, active hours)
+       - stance (official views and response strategy for disputes)
+       - special notes (represented constituency and operation style)
+       - memory relevant to this event (past actions/reactions)
+    3. age: fixed integer 30 (virtual age for organization account)
+    4. gender: fixed string "other"
+    5. mbti: MBTI type to describe communication style
+    6. country: country name
+    7. profession: organization function/role description
+    8. interested_topics: array of focus topics
 
-重要:
-- 所有字段值必须是字符串或数字，不允许null值
-- persona必须是一段连贯的文字描述，不要使用换行符
-- {get_language_instruction()} (gender字段必须用英文"other")
-- age必须是整数30，gender必须是字符串"other"
-- 机构账号发言要符合其身份定位"""
+    Important:
+    - All field values must be strings or numbers; null is not allowed
+    - persona must be one coherent paragraph with no newline characters
+    - {get_language_instruction()} (gender must remain English value "other")
+    - age must be integer 30; gender must be string "other"
+    - The account voice must match organizational identity"""
     
     def _generate_profile_rule_based(
         self,
@@ -856,7 +845,7 @@ class OasisProfileGenerator:
         graph_id: Optional[str] = None,
         parallel_count: int = 5,
         realtime_output_path: Optional[str] = None,
-        output_platform: str = "reddit"
+        output_platform: str = "reddit",
     ) -> List[OasisAgentProfile]:
         """
         批量从实体生成Agent Profile（支持并行生成）
@@ -1010,7 +999,7 @@ class OasisProfileGenerator:
         print(f"\n{'='*60}")
         print(f"人设生成完成！共生成 {len([p for p in profiles if p])} 个Agent")
         print(f"{'='*60}\n")
-        
+
         return profiles
     
     def _print_generated_profile(self, entity_name: str, entity_type: str, profile: OasisAgentProfile):
@@ -1202,4 +1191,3 @@ class OasisProfileGenerator:
         """[已废弃] 请使用 save_profiles() 方法"""
         logger.warning("save_profiles_to_json已废弃，请使用save_profiles方法")
         self.save_profiles(profiles, file_path, platform)
-
