@@ -18,6 +18,12 @@ COPY package.json package-lock.json ./
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 COPY backend/pyproject.toml backend/uv.lock ./backend/
 
+RUN apt-get update && apt-get install -y \
+    gcc \
+    python3-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # 安装依赖（Node + Python）
 # 生产镜像仅安装运行时依赖，减少体积。
 # GPU 相关包（NVIDIA CUDA 运行时、Triton 等）在无 GPU 的容器中不需要，
