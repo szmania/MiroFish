@@ -18,6 +18,7 @@ COPY package.json package-lock.json ./
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 COPY backend/pyproject.toml backend/uv.lock ./backend/
 
+# Raspberry Pi 4 Fix
 RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
